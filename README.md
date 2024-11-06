@@ -38,19 +38,6 @@ Or, if already available on AUR:
 yay -S dot-mng
 ```
 
-### Manual Installation
-
-1. Clone the repo and make the script executable:
-   ```bash
-   git clone https://github.com/jotalevi/.mng.git
-   chmod +x .mng.sh
-   ```
-
-2. Move the script to a directory in your `$PATH` (e.g., `/usr/local/bin`):
-   ```bash
-   sudo mv .mng.sh /usr/local/bin/.mng
-   ```
-
 ## Usage
 
 `.mng` provides a series of commands to manage and sync your dotfiles.
