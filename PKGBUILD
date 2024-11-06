@@ -1,14 +1,14 @@
-# Maintainer: Jotalevi <youremail@example.com>
 pkgname=dotmng
-pkgver=1.0
+pkgver=1.1
 pkgrel=1
-pkgdesc="A script to manage dotfiles with various functions and Git tracking"
+pkgdesc="A dotfile management script for Arch-based systems."
 arch=('any')
-url="https://github.com/jotalevi/.mng"  # Link to your GitHub repo
-license=('MIT')  # Adjust to your script's license if different
+url="https://github.com/jotalevi/.mng"
+license=('MIT')
 depends=('git' 'rsync' 'pacman')
-sha256sums=('SKIP')  # Replace with actual checksum if known
+source=("$pkgname-$pkgver.tar.gz::https://github.com/jotalevi/.mng/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
 
 package() {
-    install -Dm755 "$srcdir/dotmng-$pkgver/dotmng" "$pkgdir/usr/bin/dotmng"
+    install -Dm755 "$srcdir/.mng-$pkgver/dotmng" "$pkgdir/usr/bin/.mng"
 }
