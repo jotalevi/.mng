@@ -1,5 +1,5 @@
 # Maintainer: Jotalevi <youremail@example.com>
-pkgname=.mng
+pkgname=dotmng
 pkgver=1.0
 pkgrel=1
 pkgdesc="A script to manage dotfiles with various functions and Git tracking"
