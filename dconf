@@ -1,0 +1,253 @@
+#!/bin/bash
+
+# Set up variables
+HOME_DIR="$HOME"
+REPO_DIR="$HOME_DIR/dotfiles"
+TRACK_FILE="$REPO_DIR/.track"
+DEPENDENCIES=("git" "pacman" "rsync")
+
+# Check for and install necessary dependencies
+install_dependencies() {
+    echo "Checking and installing necessary dependencies..."
+    for cmd in "${DEPENDENCIES[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            echo "$cmd is not installed. Installing..."
+            sudo pacman -S --noconfirm "$cmd" || {
+                echo "Error: Unable to install $cmd. Please check your pacman setup."
+                exit 1
+            }
+        fi
+    done
+
+    # Check for yay and prompt to install if missing
+    if ! command -v yay &> /dev/null; then
+        echo "yay (AUR helper) is not installed. Installing yay is recommended for full functionality."
+        read -p "Would you like to install yay? (y/n): " install_yay
+        if [[ "$install_yay" =~ ^[Yy]$ ]]; then
+            git clone https://aur.archlinux.org/yay.git /tmp/yay && cd /tmp/yay
+            makepkg -si --noconfirm || {
+                echo "Error: Unable to install yay. Please install manually if needed."
+                exit 1
+            }
+            cd "$REPO_DIR" || exit
+        fi
+    fi
+    echo "All dependencies are installed."
+}
+
+# Function to initialize necessary files and directories
+initialize_files() {
+    echo "Initializing necessary files and directories..."
+    
+    # Ensure REPO_DIR exists
+    [ -d "$REPO_DIR" ] || mkdir -p "$REPO_DIR" || {
+        echo "Error: Unable to create repository directory $REPO_DIR."
+        exit 1
+    }
+
+    # Create TRACK_FILE if it doesn't exist
+    [ -f "$TRACK_FILE" ] || touch "$TRACK_FILE" || {
+        echo "Error: Unable to create .track file."
+        exit 1
+    }
+    echo "Created .track file for tracking specific files and directories."
+
+    # Create packages.txt if it doesn't exist
+    [ -f "$REPO_DIR/packages.txt" ] || touch "$REPO_DIR/packages.txt" || {
+        echo "Error: Unable to create packages.txt file."
+        exit 1
+    }
+    echo "Created packages.txt for package tracking."
+
+    echo "Initialization complete."
+}
+
+# Function to handle package installation from packages.txt
+install_packages() {
+    if [ -f "$REPO_DIR/packages.txt" ]; then
+        echo "Installing packages listed in packages.txt..."
+        while IFS= read -r package; do
+            if pacman -Qi "$package" &>/dev/null || yay -Qi "$package" &>/dev/null; then
+                echo "$package is already installed."
+            else
+                yay -S --noconfirm "$package" || pacman -S --noconfirm "$package" || {
+                    echo "Error: Failed to install $package."
+                    exit 1
+                }
+            fi
+        done < "$REPO_DIR/packages.txt"
+    else
+        echo "Error: packages.txt not found in $REPO_DIR."
+        exit 1
+    fi
+}
+
+# Function to copy only tracked files from .track
+copy_tracked_files() {
+    echo "Copying files and directories listed in .track from $REPO_DIR to $HOME_DIR..."
+    while IFS= read -r item; do
+        if [ -n "$item" ] && [ -e "$REPO_DIR/$item" ]; then
+            target_dir="$HOME_DIR/$(dirname "$item")"
+            mkdir -p "$target_dir" || {
+                echo "Error: Failed to create target directory $target_dir."
+                exit 1
+            }
+            echo "Copying $item..."
+            rsync -av "$REPO_DIR/$item" "$target_dir" || {
+                echo "Error: Failed to copy $item."
+                exit 1
+            }
+        fi
+    done < "$TRACK_FILE"
+    echo "File copying complete."
+}
+
+# Function to handle commits and pushes
+commit_and_push() {
+    local message="$1"
+    cd "$REPO_DIR" || { echo "Error: Unable to access repository directory."; exit 1; }
+    git add . || { echo "Error: Failed to stage changes."; exit 1; }
+    git commit -m "$message" || { echo "Error: Failed to commit changes."; exit 1; }
+    git push || { echo "Error: Failed to push changes to remote."; exit 1; }
+    echo "Changes committed and pushed with message: $message"
+}
+
+# Function for -up option: Update repository with changes from home
+update_repo() {
+    echo "Updating repository with changes from $HOME_DIR..."
+    while IFS= read -r item; do
+        if [ -n "$item" ] && [ -e "$HOME_DIR/$item" ]; then
+            target_dir="$REPO_DIR/$(dirname "$item")"
+            mkdir -p "$target_dir" || {
+                echo "Error: Failed to create target directory $target_dir."
+                exit 1
+            }
+            echo "Copying $item from $HOME_DIR to $REPO_DIR"
+            rsync -av "$HOME_DIR/$item" "$target_dir" || {
+                echo "Error: Failed to copy $item."
+                exit 1
+            }
+        fi
+    done < "$TRACK_FILE"
+
+    echo "Saving list of installed packages to packages.txt..."
+    pacman -Qq > "$REPO_DIR/packages.txt" || {
+        echo "Error: Failed to generate package list."
+        exit 1
+    }
+    if command -v yay &> /dev/null; then
+        yay -Qq >> "$REPO_DIR/packages.txt" || {
+            echo "Error: Failed to add AUR packages to package list."
+            exit 1
+        }
+    fi
+    commit_and_push "Updated from 'dconf -up' at $(date +'%Y-%m-%d %H:%M:%S')"
+}
+
+# Function for -setup option: Initial setup on a new system
+setup() {
+    install_dependencies
+    initialize_files
+    install_packages
+    copy_tracked_files
+    echo "Setup complete."
+}
+
+# Function for -r option: Pull changes from the cloud and apply to home
+pull_and_apply() {
+    echo "Pulling updates from the remote repository..."
+    cd "$REPO_DIR" || { echo "Error: Unable to access repository directory."; exit 1; }
+    git pull || { echo "Error: Failed to pull updates from remote."; exit 1; }
+    copy_tracked_files
+    echo "Remote updates applied to home directory."
+}
+
+# Function for -add option: Add new directories to track in the repository
+add_to_repo() {
+    for item in "$@"; do
+        if [ -e "$HOME_DIR/$item" ]; then
+            if ! grep -Fxq "$item" "$TRACK_FILE"; then
+                echo "$item" >> "$TRACK_FILE"
+                echo "$item added to .track"
+            else
+                echo "$item is already listed in .track"
+            fi
+            target_dir="$REPO_DIR/$(dirname "$item")"
+            mkdir -p "$target_dir" || {
+                echo "Error: Failed to create target directory $target_dir."
+                exit 1
+            }
+            rsync -av "$HOME_DIR/$item" "$target_dir" || {
+                echo "Error: Failed to copy $item."
+                exit 1
+            }
+            commit_and_push "Added $item to tracking"
+        else
+            echo "Error: $item does not exist in $HOME_DIR"
+        fi
+    done
+}
+
+# Function for -ignore option: Remove an item from .track and untrack in the repository
+ignore_and_remove() {
+    for item in "$@"; do
+        echo "Ignoring $item by removing from .track and repository if tracked..."
+        
+        if grep -Fxq "$item" "$TRACK_FILE"; then
+            sed -i "/^$item$/d" "$TRACK_FILE" || { echo "Error: Failed to remove $item from .track."; exit 1; }
+            echo "$item removed from .track."
+        else
+            echo "$item is not listed in .track."
+        fi
+
+        if git -C "$REPO_DIR" ls-files --error-unmatch "$item" &> /dev/null; then
+            git -C "$REPO_DIR" rm -r --cached "$item" || { echo "Error: Failed to untrack $item from Git."; exit 1; }
+            echo "$item removed from repository tracking."
+        fi
+
+        commit_and_push "Ignored and removed $item from tracking"
+    done
+}
+
+# Function for -clone option: Set up on a new machine from a cloned repository
+clone_setup() {
+    echo "Setting up dotfiles on a new machine from cloned repository..."
+    cd "$REPO_DIR" || { echo "Error: Unable to access repository directory."; exit 1; }
+    git pull || { echo "Error: Failed to pull latest changes from remote."; exit 1; }
+    copy_tracked_files
+    echo "Clone setup complete. Dotfiles and configurations copied to $HOME_DIR."
+}
+
+# Ensure dependencies and files are ready for all commands except -setup
+if [[ "$1" != "-setup" ]]; then
+    install_dependencies
+    [ -f "$TRACK_FILE" ] || { echo "Error: .track file missing. Run -setup first."; exit 1; }
+fi
+
+# Parse command-line arguments
+case "$1" in
+    -up)
+        update_repo
+        ;;
+    -setup)
+        setup
+        ;;
+    -r)
+        pull_and_apply
+        ;;
+    -add)
+        shift
+        add_to_repo "$@"
+        ;;
+    -ignore)
+        shift
+        ignore_and_remove "$@"
+        ;;
+    -clone)
+        clone_setup
+        ;;
+    *)
+        echo "Usage: $0 {-up|-setup|-r|-add <file_or_dir> ...|-ignore <file_or_dir> ...|-clone}"
+        exit 1
+        ;;
+esac
