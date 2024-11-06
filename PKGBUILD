@@ -1,5 +1,5 @@
 pkgname=dotmng
-pkgver=1.1
+pkgver=1.2
 pkgrel=1
 pkgdesc="A dotfile management script for Arch-based systems."
 arch=('any')
