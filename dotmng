@@ -4,7 +4,26 @@
 HOME_DIR="$HOME"
 REPO_DIR="$HOME_DIR/dotfiles"
 TRACK_FILE="$REPO_DIR/.track"
+CONFIG_FILE="$HOME_DIR/.mng_config"  # Configuration file for sync preferences
 DEPENDENCIES=("git" "pacman" "rsync")
+
+# Default sync settings if CONFIG_FILE does not exist
+SYNC_ON_LOGIN=false
+SYNC_ON_LOGOFF=false
+
+# Load configuration file if it exists
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+# Save configuration to file
+save_config() {
+    echo "SYNC_ON_LOGIN=$SYNC_ON_LOGIN" > "$CONFIG_FILE"
+    echo "SYNC_ON_LOGOFF=$SYNC_ON_LOGOFF" >> "$CONFIG_FILE"
+    echo "Configuration saved to $CONFIG_FILE."
+}
 
 # Check for and install necessary dependencies
 install_dependencies() {
@@ -146,6 +165,39 @@ update_repo() {
 
 # Function for -setup option: Initial setup on a new system
 setup() {
+    # Prompt for a Git repository URL
+    read -p "Enter the Git repository URL to track: " repo_url
+    if [ -z "$repo_url" ]; then
+        echo "Error: No repository URL provided. Exiting setup."
+        exit 1
+    fi
+
+    # Check if the directory exists and is already a Git repository
+    if [ -d "$REPO_DIR/.git" ]; then
+        echo "Directory $REPO_DIR already exists as a Git repository."
+
+        # Check if it has the correct remote URL
+        current_remote=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null)
+        if [ "$current_remote" != "$repo_url" ]; then
+            echo "Current remote URL ($current_remote) differs from the specified URL."
+            read -p "Would you like to update the remote to $repo_url? (y/n): " update_remote
+            if [[ "$update_remote" =~ ^[Yy]$ ]]; then
+                git -C "$REPO_DIR" remote set-url origin "$repo_url"
+                echo "Remote updated to $repo_url."
+            else
+                echo "Remote URL not changed."
+            fi
+        fi
+    else
+        # Clone the repository if it doesn’t exist locally
+        if git clone "$repo_url" "$REPO_DIR"; then
+            echo "Repository cloned successfully to $REPO_DIR."
+        else
+            echo "Error: Failed to clone the repository. Exiting setup."
+            exit 1
+        fi
+    fi
+
     install_dependencies
     initialize_files
     install_packages
@@ -211,17 +263,30 @@ ignore_and_remove() {
 
 # Function for -clone option: Set up on a new machine from a cloned repository
 clone_setup() {
-    echo "Setting up dotfiles on a new machine from cloned repository..."
-    cd "$REPO_DIR" || { echo "Error: Unable to access repository directory."; exit 1; }
-    git pull || { echo "Error: Failed to pull latest changes from remote."; exit 1; }
+    # Prompt for a Git repository URL
+    read -p "Enter the Git repository URL to track: " repo_url
+    if [ -z "$repo_url" ]; then
+        echo "Error: No repository URL provided. Exiting clone setup."
+        exit 1
+    fi
+
+    # Clone the repository into REPO_DIR
+    if git clone "$repo_url" "$REPO_DIR"; then
+        echo "Repository cloned successfully to $REPO_DIR."
+    else
+        echo "Error: Failed to clone the repository. Exiting clone setup."
+        exit 1
+    fi
+
+    install_packages
     copy_tracked_files
     echo "Clone setup complete. Dotfiles and configurations copied to $HOME_DIR."
 }
 
-# Ensure dependencies and files are ready for all commands except -setup
-if [[ "$1" != "-setup" ]]; then
+# Ensure dependencies and files are ready for all commands except -setup and -clone
+if [[ "$1" != "-setup" && "$1" != "-clone" ]]; then
     install_dependencies
-    [ -f "$TRACK_FILE" ] || { echo "Error: .track file missing. Run -setup first."; exit 1; }
+    [ -f "$TRACK_FILE" ] || { echo "Error: .track file missing. Run -setup or -clone first."; exit 1; }
 fi
 
 # Parse command-line arguments
